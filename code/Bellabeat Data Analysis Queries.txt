@@ -1,0 +1,424 @@
+﻿-- Checking data integrity among dailyactivity and dailyintensities datasets
+SELECT
+ *
+FROM
+ google_project.dailyactivity
+JOIN
+ google_project.dailyintensities
+ON
+ dailyactivity.Id = dailyintensities.Id
+ AND dailyactivity.ActivityDate = dailyintensities.ActivityDay
+ORDER BY
+ dailyactivity.Id,
+ ActivityDate;
+
+
+-- Checking data integrity among dailyactivity, dailycalories, and dailysteps datasets
+SELECT
+ *
+FROM
+ google_project.dailycalories dc
+JOIN
+(SELECT
+ da.Id DailyActivityId,
+ da.ActivityDate DailyActivityDate,
+ da.TotalSteps DailyActivityTotalSteps,
+ da.Calories DailyActivityCalories,
+ ds.StepTotal DailyStepTotal
+FROM
+ google_project.dailyactivity da
+JOIN
+ google_project.dailysteps ds
+ON
+ da.Id = ds.Id
+ AND da.ActivityDate = ds.ActivityDay) activitysteps
+ON
+ dc.Id = activitysteps.DailyActivityId
+ AND dc.ActivityDay = activitysteps.DailyActivityDate
+WHERE
+ dc.Calories <> activitysteps.DailyActivityCalories
+ AND activitysteps.DailyActivityTotalSteps <> activitysteps.DailyStepTotal;
+
+
+-- Checking each dataset for null values
+SELECT
+ *
+FROM
+ google_project.sleepday
+WHERE
+ TotalSleepRecords IS NULL
+ OR TotalMinutesAsleep IS NULL
+ OR TotalTimeInBed IS NULL;
+
+
+SELECT
+ *
+FROM
+ google_project.minutemetsnarrow
+WHERE
+ METs IS NULL;
+
+
+SELECT
+ *
+FROM
+ google_project.weightloginfo
+WHERE
+ Id IS NULL
+ OR Date IS NULL
+ OR WeightPounds IS NULL
+ OR BMI IS NULL
+ OR IsManualReport IS NULL;
+
+
+SELECT
+ *
+FROM
+ google_project.dailyactivity
+WHERE
+ TotalSteps IS NULL
+ OR TotalDistance IS NULL
+ OR TrackerDistance IS NULL
+ OR LoggedActivitiesDistance IS NULL
+ OR VeryActiveDistance IS NULL
+ OR ModeratelyActiveDistance IS NULL
+ OR LightActiveDistance IS NULL
+ OR SedentaryActiveDistance IS NULL
+ OR VeryActiveMinutes IS NULL
+ OR FairlyActiveMinutes IS NULL
+ OR LightlyActiveMinutes IS NULL
+ OR SedentaryMinutes IS NULL
+ OR Calories IS NULL;
+
+
+SELECT
+ *
+FROM
+ google_project.heartrateseconds
+WHERE
+ Id IS NULL
+ OR Time IS NULL
+ OR Value IS NULL;
+
+
+-- Check how many users were surveyed with each dataset
+SELECT
+ COUNT(DISTINCT(Id)) PeopleSurveyed
+FROM
+ google_project.dailyactivity;
+
+
+SELECT
+ COUNT(DISTINCT(Id)) PeopleSurveyed
+FROM
+ google_project.minutemetsnarrow;
+
+
+SELECT
+ COUNT(DISTINCT(Id)) PeopleSurveyed
+FROM
+ google_project.sleepday;
+
+
+SELECT
+ COUNT(DISTINCT(Id)) PeopleSurveyed
+FROM
+ google_project.weightloginfo;
+
+
+SELECT
+ COUNT(DISTINCT(Id)) PeopleSurveyed
+FROM
+ google_project.heartrateseconds;
+
+
+-- Transforming METs data into daily and joining to dailyactivity table
+SELECT
+ dailyactivity.Id,
+ dailyactivity.ActivityDate,
+ dailyactivity.TotalSteps,
+ dailyactivity.TotalDistance,
+ dailyactivity.TrackerDistance,
+ dailyactivity.LoggedActivitiesDistance,
+ dailyactivity.VeryActiveDistance,
+ dailyactivity.ModeratelyActiveDistance,
+ dailyactivity.LightActiveDistance,
+ dailyactivity.SedentaryActiveDistance,
+ dailyactivity.VeryActiveMinutes,
+ dailyactivity.FairlyActiveMinutes,
+ dailyactivity.LightlyActiveMinutes,
+ dailyactivity.SedentaryMinutes,
+ dailyactivity.Calories,
+ dailymetsnarrow.DailyMETs
+FROM
+ google_project.dailyactivity
+JOIN
+(SELECT
+ Id,
+ ActivityMinute ActivityDay,
+ SUM(METs) DailyMETs
+FROM
+ google_project.minutemetsnarrow
+GROUP BY
+ Id,
+ ActivityMinute) dailymetsnarrow
+ON
+ dailyactivity.Id = dailymetsnarrow.Id
+ AND dailyactivity.ActivityDate = dailymetsnarrow.ActivityDay;
+
+
+-- Adding column MinutesAwakeInBed to the table
+SELECT
+ *,
+ TotalTimeInBed - TotalMinutesAsleep AS MinutesAwakeInBed
+FROM
+ google_project.sleepday;
+
+
+-- Find the difference between each users highest weight and lowest weight
+SELECT
+ Id,
+ Date,
+ WeightPounds,
+ BMI,
+ IsManualReport,
+ MAX(WeightPounds) OVER (PARTITION BY Id, Date) - MIN(WeightPounds) OVER (PARTITION BY Id, Date)
+FROM
+ google_project.weightloginfo;
+
+
+-- Find the weight change between each user from the start to the end
+SELECT
+ Id,
+ (SELECT WeightPounds FROM google_project.weightloginfo WHERE Id = subquery.Id AND Date = subquery.startingdate) - (SELECT WeightPounds FROM google_project.weightloginfo WHERE Id = subquery.Id AND Date = subquery.endingdate) AS WeightChange
+FROM
+ (SELECT
+   Id,
+   MIN(Date) AS startingdate,
+   MAX(Date) AS endingdate
+ FROM
+   google_project.weightloginfo
+ GROUP BY
+   Id) subquery;
+
+
+-- Find the weight change between each user from the start to the end using window functions and selecting only the columns needed from weightloginfo dataset
+SELECT
+ Id,
+ Date,
+ WeightPounds,
+ BMI,
+ IsManualReport,
+ LAST_VALUE(WeightPounds) OVER (PARTITION BY Id ORDER BY Date ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) - FIRST_VALUE(WeightPounds) OVER (PARTITION BY Id ORDER BY Date ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS WeightChange
+FROM
+ google_project.weightloginfo
+ORDER BY
+ Id,
+ Date;
+
+
+-- Analyze the data
+-- Average weight and BMI by user
+SELECT
+ Id,
+ COUNT(Date) AS Numberofdays,
+ AVG(WeightPounds) AS AverageWeight,
+ AVG(BMI) AS AverageBMI
+FROM
+ google_project.weightloginfo
+GROUP BY
+ Id;
+
+
+-- Average time asleep by user
+SELECT
+ Id,
+ COUNT(TotalSleepRecords) TotalSleepRecords,
+ AVG(TotalMinutesAsleep) AS AverageTimeAsleep,
+ AVG(TotalTimeInBed) AS AverageTimeInBed
+FROM
+ google_project.sleepday
+GROUP BY
+ Id;
+
+
+-- Average METs by user and day
+SELECT
+ Id,
+ ActivityMinute,
+ COUNT(ActivityMinute) AS Minutesrecorded,
+ AVG(METs) AS AverageMETsperday
+FROM
+ google_project.minutemetsnarrow
+GROUP BY
+ Id,
+ ActivityMinute;
+
+
+-- Average, Min, and Max of heart rate by user and day
+SELECT
+ Id,
+ Time,
+ COUNT(Time) AS Secondsrecorded,
+ AVG(Value) AS Averageheartrate,
+ MIN(Value) AS Minheartrate,
+ MAX(Value) AS Maxheartrate
+FROM
+ google_project.heartrateseconds
+GROUP BY
+ Id,
+ Time;
+
+
+-- Average, Min, and Max of steps
+SELECT
+ AVG(TotalSteps) AS AverageSteps,
+ MIN(TotalSteps) AS MinSteps,
+ MAX(TOtalSteps) AS MaxSteps,
+ AVG(TotalDistance) AS AverageDistance,
+ MIN(TotalDistance) AS MinDistance,
+ MAX(TotalDistance) AS MaxDistance
+FROM
+ google_project.dailyactivity;
+
+
+-- Average, Min, and Max of steps by day
+SELECT
+ ActivityDate,
+ AVG(TotalSteps) AS AverageSteps,
+ MIN(TotalSteps) AS MinSteps,
+ MAX(TOtalSteps) AS MaxSteps,
+ AVG(TotalDistance) AS AverageDistance,
+ MIN(TotalDistance) AS MinDistance,
+ MAX(TotalDistance) AS MaxDistance
+FROM
+ google_project.dailyactivity
+GROUP BY
+ ActivityDate;
+
+
+-- Average, Min, and Max of calories and filtering out 0's
+SELECT
+ AVG(Calories) AS AverageCalories,
+ Min(Calories) AS MinCalories,
+ MAX(Calories) AS MaxCalories
+FROM
+ google_project.dailyactivity
+WHERE
+ Calories <> 0;
+
+
+-- Average, Min, and Max of calories by day and filtering out 0's
+SELECT
+ ActivityDate,
+ AVG(Calories) AS AverageCalories,
+ Min(Calories) AS MinCalories,
+ MAX(Calories) AS MaxCalories
+FROM
+ google_project.dailyactivity
+WHERE
+ Calories <> 0
+GROUP BY
+ ActivityDate;
+
+
+-- Average, Min, and Max of each activity level distance
+SELECT
+ AVG(VeryActiveDistance) AS AverageVeryActiveDistance,
+ MIN(VeryActiveDistance) AS MinVeryActiveDistance,
+ MAX(VeryActiveDistance) AS MaxVeryActiveDistance,
+ AVG(ModeratelyActiveDistance) AS AverageModeratelyActiveDistance,
+ MIN(ModeratelyActiveDistance) AS MinModeratelyActiveDistance,
+ MAX(ModeratelyActiveDistance) AS MaxModeratelyActiveDistance,
+ AVG(LightActiveDistance) AS AverageLightActiveDistance,
+ MIN(LightActiveDistance) AS MinLightActiveDistance,
+ MAX(LightActiveDistance) AS MaxLightActiveDistance,
+ AVG(SedentaryActiveDistance) AS AverageSedentaryActiveDistance,
+ MIN(SedentaryActiveDistance) AS MinSedentaryActiveDistance,
+ MAX(SedentaryActiveDistance) AS MaxSendentaryActiveDistance
+FROM
+ google_project.dailyactivity;
+
+
+-- Average, Min, and Max of each activity level distance by day
+SELECT
+ ActivityDate,
+ AVG(VeryActiveDistance) AS AverageVeryActiveDistance,
+ MIN(VeryActiveDistance) AS MinVeryActiveDistance,
+ MAX(VeryActiveDistance) AS MaxVeryActiveDistance,
+ AVG(ModeratelyActiveDistance) AS AverageModeratelyActiveDistance,
+ MIN(ModeratelyActiveDistance) AS MinModeratelyActiveDistance,
+ MAX(ModeratelyActiveDistance) AS MaxModeratelyActiveDistance,
+ AVG(LightActiveDistance) AS AverageLightActiveDistance,
+ MIN(LightActiveDistance) AS MinLightActiveDistance,
+ MAX(LightActiveDistance) AS MaxLightActiveDistance,
+ AVG(SedentaryActiveDistance) AS AverageSedentaryActiveDistance,
+ MIN(SedentaryActiveDistance) AS MinSedentaryActiveDistance,
+ MAX(SedentaryActiveDistance) AS MaxSendentaryActiveDistance
+FROM
+ google_project.dailyactivity
+GROUP BY
+ ActivityDate;
+
+
+-- Average, Min, and Max of each activity level by day
+SELECT
+ AVG(VeryActiveMinutes) AS AverageVeryActiveMinutes,
+ MIN(VeryActiveMinutes) AS MinVeryActiveMinutes,
+ MAX(VeryActiveMinutes) AS MaxVeryactiveMInutes,
+ AVG(FairlyActiveMinutes) AS AverageFairlyActiveMinutes,
+ MIN(FairlyActiveMinutes) AS MinFairlyActiveMinutes,
+ MAX(FairlyActiveMinutes) AS MaxFairlyActiveMinutes,
+ AVG(LightlyActiveMinutes) AS AverageLightlyActiveMinutes,
+ MIN(LightlyActiveMinutes) AS MinLightlyActiveMinutes,
+ MAX(LightlyActiveMinutes) AS MaxLightlyActiveMinutes,
+ AVG(SedentaryMinutes) AS AverageSedentaryMinutes,
+ MIN(SedentaryMinutes) AS MinSedentaryMinutes,
+ MAX(SedentaryMinutes) AS MaxSendentaryMinutes
+FROM
+ google_project.dailyactivity;
+
+
+-- Average, Min, and Max of each activity level by day
+SELECT
+ ActivityDate,
+ AVG(VeryActiveMinutes) AS AverageVeryActiveMinutes,
+ MIN(VeryActiveMinutes) AS MinVeryActiveMinutes,
+ MAX(VeryActiveMinutes) AS MaxVeryactiveMInutes,
+ AVG(FairlyActiveMinutes) AS AverageFairlyActiveMinutes,
+ MIN(FairlyActiveMinutes) AS MinFairlyActiveMinutes,
+ MAX(FairlyActiveMinutes) AS MaxFairlyActiveMinutes,
+ AVG(LightlyActiveMinutes) AS AverageLightlyActiveMinutes,
+ MIN(LightlyActiveMinutes) AS MinLightlyActiveMinutes,
+ MAX(LightlyActiveMinutes) AS MaxLightlyActiveMinutes,
+ AVG(SedentaryMinutes) AS AverageSedentaryMinutes,
+ MIN(SedentaryMinutes) AS MinSedentaryMinutes,
+ MAX(SedentaryMinutes) AS MaxSendentaryMinutes
+FROM
+ google_project.dailyactivity
+GROUP BY
+ ActivityDate;
+
+
+-- Percentage breakdown of activity level
+SELECT
+ SUM(VeryActiveMinutes)/SUM(VeryActiveMinutes + FairlyActiveMinutes + LightlyActiveMinutes + SedentaryMinutes)*100 AS VeryActiveMinPercentage,
+ SUM(FairlyActiveMinutes)/SUM(VeryActiveMinutes + FairlyActiveMinutes + LightlyActiveMinutes + SedentaryMinutes)*100 AS FairlyActiveMinutesPercentage,
+ SUM(LightlyActiveMinutes)/SUM(VeryActiveMinutes + FairlyActiveMinutes + LightlyActiveMinutes + SedentaryMinutes)*100 AS LightlyActiveMinutesPercentage,
+ SUM(SedentaryMinutes)/SUM(VeryActiveMinutes + FairlyActiveMinutes + LightlyActiveMinutes + SedentaryMinutes)*100 AS SedentaryMinutesPercentage
+FROM
+ google_project.dailyactivity;
+
+
+-- Average Active Minutes Daily
+SELECT
+ AVG(TotalSteps) AverageTotalSteps,
+ AVG(VeryActiveMinutes) AverageVeryActiveMinutes,
+ AVG(FairlyActiveMinutes) AverageFairlyActiveMinutes,
+ AVG(LightlyActiveMinutes) AverageLightlyActiveMinutes,
+ AVG(SedentaryMinutes) AverageSedentaryMinutes,
+ FORMAT_DATE('%A', DATE(ActivityDate)) WeekdayName
+FROM
+ google_project.dailyactivity
+GROUP BY
+ WeekdayName;
